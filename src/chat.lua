@@ -24,6 +24,9 @@
 local _M = {}
 
 
+local semaphore = require("ngx.semaphore")
+
+
 local CLIENTS = setmetatable({}, { __mode = 'k' })
 
 
@@ -63,6 +66,8 @@ function _M.go()
         return ngx.exit(500)
     end
 
+    ctx.sem = semaphore.new()
+
     ngx.thread.spawn(function()
         while true do
             message, err = sock:receive('*l')
@@ -81,6 +86,7 @@ function _M.go()
             for k, _ in pairs(CLIENTS) do
                 if k ~= ctx then
                     k.message = message
+                    k.sem:post()
                 end
             end
 
@@ -114,8 +120,12 @@ function _M.go()
             end
         end
 
-        -- TODO: would be better to use ngx.semaphore once it is available in stream
-        ngx.sleep(0.1)
+        local res, err = ctx.sem:wait(10)
+        if not res and err ~= 'timeout' then
+            ngx.log(ngx.ERR, "unable to wait on semaphore: ", err)
+
+            return ngx.exit(500)
+        end
     end
 end
 
